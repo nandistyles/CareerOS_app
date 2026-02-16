@@ -1,0 +1,22 @@
+
+{
+  "name": "CareerOS: Jungle Edition",
+  "short_name": "CareerOS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020604",
+  "theme_color": "#020604",
+  "description": "The Operating System for Human Potential. Survive the concrete jungle.",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3665/3665923.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3665/3665923.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
