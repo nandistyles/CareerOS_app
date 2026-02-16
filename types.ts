@@ -104,6 +104,27 @@ export interface ResumeAnalysis {
     roleFit: string;
 }
 
+// NEW: Analysis for Career Pathfinder
+export interface RoleMatchAnalysis {
+    seniorityLevel: string; // e.g. "Mid-Senior Level"
+    recommendedRoles: {
+        title: string;
+        matchPercentage: number;
+        reason: string;
+    }[];
+    confidenceBoost: string; // Motivational analysis
+    hiddenSuperpower: string; // A unique skill combo detected
+    industryFit: string[];
+}
+
+export interface TailoredResume {
+    id: string;
+    jobTitle: string;
+    company: string;
+    content: string;
+    date: string;
+}
+
 // --- NETWORK ---
 
 export interface Mentor {
@@ -162,8 +183,10 @@ export interface UserProfile {
   marketValue?: number; // Estimated Salary/Rate
 
   // Content
-  resumeText?: string;
+  resumeText?: string; // The Master CV
+  resumeHistory?: TailoredResume[]; // History of applied/tailored CVs
   resumeAnalysis?: ResumeAnalysis;
+  pathfinderAnalysis?: RoleMatchAnalysis; // Saved Pathfinder results
   profileImage?: string;
   
   // Learning

@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { Bid, StrategicPillar, JobOpportunity, ResumeAnalysis, QuizQuestion, StrategicGoal, Course, CourseModule, UserProfile, Mentor, NetworkEvent } from '../types';
+import { Bid, StrategicPillar, JobOpportunity, ResumeAnalysis, QuizQuestion, StrategicGoal, Course, CourseModule, UserProfile, Mentor, NetworkEvent, RoleMatchAnalysis } from '../types';
 
 const getClient = () => {
     try {
@@ -18,6 +18,124 @@ const getClient = () => {
         return null;
     }
 }
+
+// --- CAREER DISCOVERY (NEW) ---
+
+export const runProfileDiscovery = async (
+    currentProfile: string, 
+    history: {role: string, text: string}[], 
+    lastUserMessage: string
+): Promise<{
+    aiQuestion: string;
+    extractedSkills: string[];
+    newContextParam: string;
+} | null> => {
+    const ai = getClient();
+    if (!ai) return null;
+
+    const prompt = `
+    You are an expert Career Archaeologist. Your goal is to interview the user to uncover "Hidden Skills" and "Unstated Experience" that are missing from their current profile.
+    
+    CURRENT PROFILE CONTEXT:
+    "${currentProfile.slice(0, 5000)}"
+    
+    CONVERSATION HISTORY:
+    ${history.map(h => `${h.role}: ${h.text}`).join('\n')}
+    
+    USER'S LATEST ANSWER:
+    "${lastUserMessage}"
+    
+    TASK:
+    1. Analyze the user's latest answer.
+    2. Extract any specific hard skills, soft skills, or tools mentioned (e.g. "Budgeting", "React", "Conflict Resolution").
+    3. Formulate a short, concise "Context Parameter" summary of the new fact learned (e.g. "Managed $50k budget in 2022").
+    4. Ask ONE follow-up question to dig deeper into a different area or expand on the current topic. Be conversational and encouraging.
+    
+    Return JSON.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        aiQuestion: { type: Type.STRING },
+                        extractedSkills: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        newContextParam: { type: Type.STRING }
+                    },
+                    required: ["aiQuestion", "extractedSkills", "newContextParam"]
+                }
+            }
+        });
+        return JSON.parse(response.text || '{}');
+    } catch (e) {
+        console.error("Discovery session failed", e);
+        return null;
+    }
+};
+
+// --- CAREER PATHFINDER (NEW) ---
+
+export const matchRolesToResume = async (resumeText: string): Promise<RoleMatchAnalysis | null> => {
+    const ai = getClient();
+    if (!ai) return null;
+
+    const prompt = `
+    Act as an empathetic but objective Executive Career Coach.
+    Analyze the following resume text to help a candidate who might be suffering from imposter syndrome.
+    
+    RESUME CONTENT:
+    "${resumeText.slice(0, 8000)}"
+    
+    TASK:
+    1. Determine their REALISTIC seniority level (Junior, Mid-Level, Senior, Lead, Executive) based on skills and years implied.
+    2. Identify 4 specific Job Titles they are qualified to apply for TODAY.
+    3. Identify one "Hidden Superpower" (a unique combination of skills they have).
+    4. Write a short "Confidence Boost" paragraph explaining why they are valuable.
+    
+    Return a JSON object matching the RoleMatchAnalysis interface.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        seniorityLevel: { type: Type.STRING },
+                        recommendedRoles: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    title: { type: Type.STRING },
+                                    matchPercentage: { type: Type.INTEGER },
+                                    reason: { type: Type.STRING }
+                                },
+                                required: ["title", "matchPercentage", "reason"]
+                            }
+                        },
+                        confidenceBoost: { type: Type.STRING },
+                        hiddenSuperpower: { type: Type.STRING },
+                        industryFit: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    },
+                    required: ["seniorityLevel", "recommendedRoles", "confidenceBoost", "hiddenSuperpower", "industryFit"]
+                }
+            }
+        });
+        return JSON.parse(response.text || '{}') as RoleMatchAnalysis;
+    } catch (e) {
+        console.error("Pathfinder analysis failed", e);
+        return null;
+    }
+};
 
 // --- NETWORK GENERATION ---
 
@@ -312,7 +430,7 @@ export const evaluateSimulation = async (history: {role: string, text: string}[]
                     properties: {
                         score: { type: Type.INTEGER },
                         feedback: { type: Type.STRING },
-                        tips: { type: Type.ARRAY, items: { type: Type.STRING } }
+                        tips: { type: Type.ARRAY, items: { type: Type.STRING } },
                     },
                     required: ["score", "feedback", "tips"]
                 }
@@ -492,65 +610,94 @@ export const generateMarketplaceOpportunities = async (
     location: string, 
     keywords: string[],
     jobType?: string,
-    minSalary?: number
+    minSalary?: number,
+    persona?: string // Added persona parameter
 ): Promise<JobOpportunity[]> => {
     const ai = getClient();
     if (!ai) return [];
 
     const isGlobal = location.toLowerCase() === 'global' || location.toLowerCase() === 'worldwide';
     const locString = isGlobal ? "Globally (Worldwide)" : `in ${location}`;
-    
-    let searchFocus = `Find 20 REAL, ACTIVE Opportunities ${locString} related to "${industry}" and keywords: ${keywords.join(', ')}.`;
-    let domainFocus = "";
-    
-    const isGrantSearch = keywords.some(k => k.toLowerCase().includes('grant') || k.toLowerCase().includes('funding') || k.toLowerCase().includes('donor'));
-    const isFellowshipSearch = keywords.some(k => k.toLowerCase().includes('fellowship') || k.toLowerCase().includes('residency'));
-    const isEventSearch = keywords.some(k => k.toLowerCase().includes('workshop') || k.toLowerCase().includes('conference') || k.toLowerCase().includes('summit'));
+    const isRecruiter = persona === 'Recruiter';
 
-    if (jobType === 'Grant' || isGrantSearch) {
-        searchFocus = `Find 20 ACTIVE Grants, Funding Calls, or Donor Opportunities for "${industry}" ${locString}. Focus on ESG, Tech, NGOs, and Startups.`;
-        domainFocus = "site:fundsforngos.org OR site:terravivagrants.org OR site:grants.gov OR site:challenge.gov";
-    } else if (jobType === 'Fellowship' || isFellowshipSearch) {
-        searchFocus = `Find 20 ACTIVE Fellowships, Residencies, or Professional Exchange programs for "${industry}" professionals ${locString}.`;
-        domainFocus = "site:opportunitiesforafricans.com OR site:mandelawashingtonfellowship.org OR site:profellow.com";
-    } else if (jobType === 'Workshop' || jobType === 'Conference' || isEventSearch) {
-        searchFocus = `Find 20 UPCOMING Seminars, Workshops, Critical Empowerment Conferences, or Industry Summits for "${industry}" ${locString}.`;
-        domainFocus = "site:eventbrite.com OR site:linkedin.com/events OR site:10times.com";
+    let prompt = '';
+    let domainFocus = '';
+
+    if (isRecruiter) {
+        // --- RECRUITER LOGIC (Generating Candidates) ---
+        prompt = `
+        Act as a Global Talent Scraper.
+        Find 12 Top Candidate Profiles (Anonymized) for "${industry}" roles ${locString}.
+        Focus keywords: ${keywords.join(', ')}.
+        
+        TASK:
+        Generate realistic candidate profiles that a Recruiter would see.
+        Map them to the 'JobOpportunity' structure as follows:
+        - **title**: The Candidate's Role (e.g. "Senior React Developer" or "Project Manager").
+        - **company**: Their Current Employer (e.g. "Google" or "Top Fintech Startup").
+        - **budget**: Their Salary Expectation (e.g. "$120k/yr" or "$50/hr").
+        - **type**: Availability (e.g. 'Full-time', 'Contract', 'Immediate').
+        - **description**: Professional Summary (Skills, YOE, Key Achievements).
+        - **skills**: List of top skills.
+        - **matchReason**: Why they fit the query (e.g. "Ex-Google, Strong React").
+        - **probability**: Placement Probability (0-100).
+        
+        Use Google Search to find real talent trends/companies in ${location}.
+        `;
+        domainFocus = `site:linkedin.com/in/ OR site:github.com OR site:behance.net ${industry} ${location}`;
     } else {
-        if (minSalary && minSalary > 0) {
-            searchFocus += ` PRIORITIZE roles with estimated budget above $${minSalary}.`;
-        }
-        if (jobType && jobType !== 'All') {
-            searchFocus += ` FOCUS exclusively on "${jobType}" type roles.`;
-        }
-        if (isGlobal) {
-            domainFocus = "site:weworkremotely.com OR site:linkedin.com/jobs OR site:indeed.com OR site:glassdoor.com OR site:remoteok.com";
-        } else {
-            domainFocus = `site:linkedin.com/jobs/ ${location} OR site:indeed.com ${location}`;
-        }
-    }
+        // --- STANDARD LOGIC (Generating Jobs) ---
+        let searchFocus = `Find 20 REAL, ACTIVE Opportunities ${locString} related to "${industry}" and keywords: ${keywords.join(', ')}.`;
+        
+        const isGrantSearch = keywords.some(k => k.toLowerCase().includes('grant') || k.toLowerCase().includes('funding') || k.toLowerCase().includes('donor'));
+        const isFellowshipSearch = keywords.some(k => k.toLowerCase().includes('fellowship') || k.toLowerCase().includes('residency'));
+        const isEventSearch = keywords.some(k => k.toLowerCase().includes('workshop') || k.toLowerCase().includes('conference') || k.toLowerCase().includes('summit'));
 
-    const prompt = `
-    ${searchFocus}
-    
-    Context:
-    - User Keywords: ${keywords.join(', ')}
-    - **SEARCH STRATEGY**: Perform a deep Google Search using these domains if relevant: ${domainFocus}.
-    - **Goal**: Find REAL, recent listings. Focus on TECH, ESG, Finance, or whatever specific niche the user asked for in "${industry}".
-    - **External Links**: You MUST try to find the "sourceUrl" (Direct application link or official listing page).
-    
-    Formatting:
-    - **Type**: Must be strictly one of: 'Full-time' | 'Contract' | 'Remote' | 'Freelance' | 'Internship' | 'Tender' | 'Grant' | 'Fellowship' | 'Workshop' | 'Conference'.
-    - **Budget**: 
-        - For Jobs: Estimate salary (e.g. "$4,000 - $6,000/mo").
-        - For Grants: Grant size (e.g. "$50,000 Funding").
-        - For Workshops: Ticket price (e.g. "Free" or "$500 Entry").
-        - For Fellowships: Stipend amount (e.g. "Fully Funded").
-    - **Company**: For Events/Workshops, this is the Organizer/Host.
-    - **sourceUrl**: Valid link to the opportunity. If not found, use a smart Google Search link (e.g., "https://www.google.com/search?q=${industry}+${location}+Application").
-    
-    Return a JSON array of JobOpportunity objects.
-    `;
+        if (jobType === 'Grant' || isGrantSearch) {
+            searchFocus = `Find 20 ACTIVE Grants, Funding Calls, or Donor Opportunities for "${industry}" ${locString}. Focus on ESG, Tech, NGOs, and Startups.`;
+            domainFocus = "site:fundsforngos.org OR site:terravivagrants.org OR site:grants.gov OR site:challenge.gov";
+        } else if (jobType === 'Fellowship' || isFellowshipSearch) {
+            searchFocus = `Find 20 ACTIVE Fellowships, Residencies, or Professional Exchange programs for "${industry}" professionals ${locString}.`;
+            domainFocus = "site:opportunitiesforafricans.com OR site:mandelawashingtonfellowship.org OR site:profellow.com";
+        } else if (jobType === 'Workshop' || jobType === 'Conference' || isEventSearch) {
+            searchFocus = `Find 20 UPCOMING Seminars, Workshops, Critical Empowerment Conferences, or Industry Summits for "${industry}" ${locString}.`;
+            domainFocus = "site:eventbrite.com OR site:linkedin.com/events OR site:10times.com";
+        } else {
+            if (minSalary && minSalary > 0) {
+                searchFocus += ` PRIORITIZE roles with estimated budget above $${minSalary}.`;
+            }
+            if (jobType && jobType !== 'All') {
+                searchFocus += ` FOCUS exclusively on "${jobType}" type roles.`;
+            }
+            if (isGlobal) {
+                domainFocus = "site:weworkremotely.com OR site:linkedin.com/jobs OR site:indeed.com OR site:glassdoor.com OR site:remoteok.com";
+            } else {
+                domainFocus = `site:linkedin.com/jobs/ ${location} OR site:indeed.com ${location}`;
+            }
+        }
+
+        prompt = `
+        ${searchFocus}
+        
+        Context:
+        - User Keywords: ${keywords.join(', ')}
+        - **SEARCH STRATEGY**: Perform a deep Google Search using these domains if relevant: ${domainFocus}.
+        - **Goal**: Find REAL, recent listings. Focus on TECH, ESG, Finance, or whatever specific niche the user asked for in "${industry}".
+        - **External Links**: You MUST try to find the "sourceUrl" (Direct application link or official listing page).
+        
+        Formatting:
+        - **Type**: Must be strictly one of: 'Full-time' | 'Contract' | 'Remote' | 'Freelance' | 'Internship' | 'Tender' | 'Grant' | 'Fellowship' | 'Workshop' | 'Conference'.
+        - **Budget**: 
+            - For Jobs: Estimate salary (e.g. "$4,000 - $6,000/mo").
+            - For Grants: Grant size (e.g. "$50,000 Funding").
+            - For Workshops: Ticket price (e.g. "Free" or "$500 Entry").
+            - For Fellowships: Stipend amount (e.g. "Fully Funded").
+        - **Company**: For Events/Workshops, this is the Organizer/Host.
+        - **sourceUrl**: Valid link to the opportunity. If not found, use a smart Google Search link (e.g., "https://www.google.com/search?q=${industry}+${location}+Application").
+        
+        Return a JSON array of JobOpportunity objects.
+        `;
+    }
 
     try {
         const response = await ai.models.generateContent({
@@ -567,7 +714,7 @@ export const generateMarketplaceOpportunities = async (
                             id: { type: Type.STRING },
                             title: { type: Type.STRING },
                             company: { type: Type.STRING },
-                            type: { type: Type.STRING, enum: ['Full-time', 'Contract', 'Remote', 'Freelance', 'Internship', 'Tender', 'Grant', 'Fellowship', 'Workshop', 'Conference'] },
+                            type: { type: Type.STRING }, // Relaxed enum for flexibility
                             budget: { type: Type.STRING },
                             description: { type: Type.STRING },
                             skills: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -577,7 +724,9 @@ export const generateMarketplaceOpportunities = async (
                             isFeatured: { type: Type.BOOLEAN },
                             isVerified: { type: Type.BOOLEAN },
                             applicantsCount: { type: Type.INTEGER },
-                            sourceUrl: { type: Type.STRING, description: "URL to apply or view details" }
+                            sourceUrl: { type: Type.STRING, description: "URL to apply or view details" },
+                            matchReason: { type: Type.STRING }, // Added for Recruiter matching
+                            probability: { type: Type.INTEGER }  // Added for Recruiter probability
                         },
                         required: ["id", "title", "company", "type", "budget", "description", "skills", "location"]
                     }

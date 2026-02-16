@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { UserProfile, JobOpportunity, ViewState, Course } from '../types';
-import { Search, MapPin, Building2, Briefcase, Globe, Filter, Loader2, RefreshCw, AlertTriangle, BookOpen, ArrowRight, X, FileText, PenTool, CheckCircle, Send, Sparkles, Shield, Landmark, Gift, HeartHandshake, Mic2, ExternalLink, Download, ChevronDown, Radar, Target, Crosshair, TrendingUp, Lock } from 'lucide-react';
+import { UserProfile, JobOpportunity, ViewState, Course, TailoredResume } from '../types';
+import { Search, MapPin, Building2, Briefcase, Globe, Filter, Loader2, RefreshCw, AlertTriangle, BookOpen, ArrowRight, X, FileText, PenTool, CheckCircle, Send, Sparkles, Shield, Landmark, Gift, HeartHandshake, Mic2, ExternalLink, Download, ChevronDown, Radar, Target, Crosshair, TrendingUp, Lock, Users, User, Save } from 'lucide-react';
 import { generateMarketplaceOpportunities, generateCoverLetter, tailorResumeToJob, generateOpportunities } from '../services/geminiService';
 
 interface MarketplaceProps {
@@ -38,7 +38,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
     
     // Intel / Application State
     const [selectedJob, setSelectedJob] = useState<JobOpportunity | null>(null);
-    const [intelMode, setIntelMode] = useState(false); // The "10/10" Feature
+    const [intelMode, setIntelMode] = useState(false); 
     const [appStep, setAppStep] = useState<'generating' | 'review' | 'success'>('generating');
     const [generatedAssets, setGeneratedAssets] = useState<{coverLetter: string, tailoredResume: string}>({ coverLetter: '', tailoredResume: '' });
     const [activeAssetTab, setActiveAssetTab] = useState<'cover' | 'resume'>('cover');
@@ -77,10 +77,17 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                     sourceUrl: bid.sourceUrl
                 }));
             } else {
-                results = await generateMarketplaceOpportunities(industry, location, keywords, filterType);
+                results = await generateMarketplaceOpportunities(
+                    industry, 
+                    location, 
+                    keywords, 
+                    filterType, 
+                    0, 
+                    user.primaryFocus // Pass persona to service
+                );
             }
             
-            // Add "Intel" properties purely for UI demonstration of the 10/10 feature
+            // Add "Intel" properties purely for UI demonstration
             const enhancedResults = results.map(j => ({
                 ...j,
                 probability: j.probability || Math.floor(Math.random() * (98 - 60) + 60),
@@ -99,8 +106,15 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
         setSelectedJob(job);
         setAppStep('generating');
         
-        // Simulate AI "Thinking" time for better UX
         try {
+            if (isRecruiter) {
+                // RECRUITER LOGIC: Generate Interview Request
+                const letter = `Dear ${job.title.split(' - ')[0] || 'Candidate'},\n\nI came across your profile and was impressed by your experience at ${job.company}. We have an opening that aligns perfectly with your skills in ${job.skills.slice(0,2).join(', ')}.\n\nWould you be open to a brief chat regarding a ${job.type} opportunity?`;
+                setGeneratedAssets({ coverLetter: letter, tailoredResume: '' });
+                setAppStep('review');
+                return;
+            }
+
             const userResume = user.resumeText || user.businessDescription || `Professional in ${user.industry}`;
             
             let letter = '', resume = '';
@@ -124,7 +138,23 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
 
     const confirmApplication = () => {
         if (onUpdateUser && selectedJob) {
-            onUpdateUser({ ...user, appliedJobIds: [...(user.appliedJobIds || []), selectedJob.id] });
+            const newHistoryItem: TailoredResume = {
+                id: `resume-${Date.now()}`,
+                jobTitle: selectedJob.title,
+                company: selectedJob.company,
+                content: generatedAssets.tailoredResume,
+                date: new Date().toLocaleDateString()
+            };
+
+            const appliedJobIds = [...(user.appliedJobIds || []), selectedJob.id];
+            const resumeHistory = [...(user.resumeHistory || []), newHistoryItem];
+
+            // Update User Profile with new Application ID AND new Tailored Resume
+            onUpdateUser({ 
+                ...user, 
+                appliedJobIds,
+                resumeHistory
+            });
         }
         setAppStep('success');
         setTimeout(() => setSelectedJob(null), 2500);
@@ -151,30 +181,30 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
             <div className="flex justify-between items-start mb-6 shrink-0">
                 <div>
                     <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold uppercase tracking-widest mb-1">
-                        <Radar size={14} className="animate-pulse" /> Strategic Intel
+                        <Radar size={14} className="animate-pulse" /> {isRecruiter ? 'Talent Analysis' : 'Strategic Intel'}
                     </div>
-                    <h3 className="text-white font-bold text-lg leading-tight line-clamp-1">{job.company} Analysis</h3>
+                    <h3 className="text-white font-bold text-lg leading-tight line-clamp-1">{isRecruiter ? job.title : job.company + ' Analysis'}</h3>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); setIntelMode(false); }} className="text-slate-400 hover:text-white p-2 bg-white/5 rounded-full transition-colors"><X size={18} /></button>
             </div>
             
             <div className="grid grid-cols-2 gap-3 mb-6 overflow-y-auto custom-scrollbar flex-1 content-start">
                 <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                    <div className="text-slate-500 text-[10px] uppercase font-bold mb-1">Density</div>
-                    <div className="text-white font-bold text-sm flex items-center gap-2">
-                        {job.applicantsCount < 10 ? 'Low' : 'High'} <span className="text-[10px] text-slate-400 font-normal">({job.applicantsCount} active)</span>
+                    <div className="text-slate-500 text-[10px] uppercase font-bold mb-1">{isRecruiter ? 'Flight Risk' : 'Density'}</div>
+                    <div className="text-white font-bold text-sm">
+                        {isRecruiter ? (job.probability && job.probability > 80 ? 'High' : 'Low') : (job.applicantsCount < 10 ? 'Low' : 'High')}
                     </div>
                 </div>
                 <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                    <div className="text-slate-500 text-[10px] uppercase font-bold mb-1">Budget</div>
-                    <div className="text-emerald-400 font-bold text-sm">Liquid</div>
+                    <div className="text-slate-500 text-[10px] uppercase font-bold mb-1">{isRecruiter ? 'Salary Exp.' : 'Budget'}</div>
+                    <div className="text-emerald-400 font-bold text-sm">{isRecruiter ? job.budget : 'Liquid'}</div>
                 </div>
                 <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                    <div className="text-slate-500 text-[10px] uppercase font-bold mb-1">Decision Maker</div>
-                    <div className="text-white font-bold text-sm">Director Lvl</div>
+                    <div className="text-slate-500 text-[10px] uppercase font-bold mb-1">{isRecruiter ? 'Current Role' : 'Decision Maker'}</div>
+                    <div className="text-white font-bold text-sm truncate">{isRecruiter ? job.company : 'Director Lvl'}</div>
                 </div>
                 <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                    <div className="text-slate-500 text-[10px] uppercase font-bold mb-1">Win Prob.</div>
+                    <div className="text-slate-500 text-[10px] uppercase font-bold mb-1">{isRecruiter ? 'Placement Prob.' : 'Win Prob.'}</div>
                     <div className="text-emerald-400 font-bold text-sm">{job.probability}%</div>
                 </div>
             </div>
@@ -184,11 +214,14 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                     onClick={(e) => { e.stopPropagation(); setIntelMode(false); handleApplyClick(job); }}
                     className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-900/50 flex items-center justify-center gap-2 text-sm transition-all hover:scale-[1.02]"
                 >
-                    <Crosshair size={18} /> Initiate Strike (Apply)
+                    <Crosshair size={18} /> {isRecruiter ? 'Draft Offer / Message' : 'Initiate Strike (Apply)'}
                 </button>
             </div>
         </div>
     );
+
+    const recruiterFilters = ['All', 'Senior', 'Mid-Level', 'Junior', 'Contract'];
+    const standardFilters = ['All', 'Full-time', 'Contract', 'Grant', 'Tender'];
 
     return (
         <div className="p-6 md:p-12 pb-32 min-h-screen bg-[#020604] relative">
@@ -198,11 +231,11 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
             {/* Header */}
             <div className="relative z-10 mb-8">
                 <h1 className="text-3xl md:text-4xl font-serif font-bold text-white tracking-tight mb-2 flex items-center gap-3">
-                    {isContractor ? <Landmark size={32} className="text-amber-500" /> : <Target size={32} className="text-emerald-500" />}
-                    {isContractor ? 'Procurement Radar' : 'Opportunity Targeting'}
+                    {isRecruiter ? <Users size={32} className="text-blue-500"/> : isContractor ? <Landmark size={32} className="text-amber-500" /> : <Target size={32} className="text-emerald-500" />}
+                    {isRecruiter ? 'Talent Sourcing' : isContractor ? 'Procurement Radar' : 'Opportunity Targeting'}
                 </h1>
                 <p className="text-slate-400 text-sm md:text-base">
-                    AI-Calibrated Opportunities. <span className="text-emerald-400 font-bold">Win Probability</span> > 70% highlighted.
+                    AI-Calibrated {isRecruiter ? 'Candidates' : 'Opportunities'}. <span className="text-emerald-400 font-bold">{isRecruiter ? 'Placement Probability' : 'Win Probability'}</span> > 70% highlighted.
                 </p>
             </div>
 
@@ -214,7 +247,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSearch(false)}
-                        placeholder={isContractor ? "Search tenders by ID, keyword or agency..." : "Search roles, skills or companies..."}
+                        placeholder={isRecruiter ? "Search for skills, roles (e.g. React Developer)..." : isContractor ? "Search tenders by ID, keyword or agency..." : "Search roles, skills or companies..."}
                         className="w-full pl-12 pr-4 py-3 bg-[#020604]/50 border border-emerald-500/10 rounded-xl text-white outline-none focus:border-emerald-500/50 placeholder-slate-600 transition-all text-sm"
                     />
                 </div>
@@ -232,14 +265,14 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                         className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 whitespace-nowrap text-sm"
                     >
                         {isLoading ? <Loader2 className="animate-spin" size={18}/> : <RefreshCw size={18}/>}
-                        <span className="hidden md:inline">Scan Sector</span>
+                        <span className="hidden md:inline">{isRecruiter ? 'Scout Talent' : 'Scan Sector'}</span>
                     </button>
                 </div>
             </div>
 
             {/* Filters */}
             <div className="flex gap-2 mb-8 overflow-x-auto pb-2 custom-scrollbar">
-                {['All', 'Full-time', 'Contract', 'Grant', 'Tender'].map(f => (
+                {(isRecruiter ? recruiterFilters : standardFilters).map(f => (
                     <button 
                         key={f} 
                         onClick={() => setFilterType(f)}
@@ -265,12 +298,13 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                                 <div className="flex justify-between items-start mb-6">
                                     <div className="flex items-center gap-4">
                                         <div className="w-14 h-14 bg-slate-800 rounded-xl flex items-center justify-center text-slate-400 font-bold text-xl border border-white/5 shrink-0">
-                                            {job.company.charAt(0)}
+                                            {isRecruiter ? <User size={24}/> : job.company.charAt(0)}
                                         </div>
                                         <div>
                                             <h3 className="font-bold text-white text-lg group-hover:text-emerald-400 transition-colors line-clamp-2 leading-tight">{job.title}</h3>
                                             <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
-                                                <Building2 size={12}/> {job.company}
+                                                {isRecruiter ? <Briefcase size={12}/> : <Building2 size={12}/>} 
+                                                {job.company}
                                                 <span>•</span>
                                                 <MapPin size={12}/> {job.location}
                                             </div>
@@ -283,7 +317,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                                 <div className="flex flex-wrap gap-2 mb-6">
                                     <span className="px-2 py-1 bg-white/5 rounded text-[10px] font-bold text-slate-400 border border-white/5">{job.type}</span>
                                     <span className="px-2 py-1 bg-emerald-500/10 rounded text-[10px] font-bold text-emerald-400 border border-emerald-500/20">{job.budget}</span>
-                                    {job.isFeatured && <span className="px-2 py-1 bg-amber-500/10 rounded text-[10px] font-bold text-amber-400 border border-amber-500/20 flex items-center gap-1"><Sparkles size={10}/> Priority</span>}
+                                    {job.isFeatured && <span className="px-2 py-1 bg-amber-500/10 rounded text-[10px] font-bold text-amber-400 border border-amber-500/20 flex items-center gap-1"><Sparkles size={10}/> {isRecruiter ? 'Top Talent' : 'Priority'}</span>}
                                 </div>
 
                                 {/* Description Preview */}
@@ -291,8 +325,8 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                                     {job.description}
                                 </p>
 
-                                {/* Skill Gap Warning (if any) */}
-                                {course && !isApplied && (
+                                {/* Skill Gap Warning (if any) - Only for Job Seekers */}
+                                {!isRecruiter && course && !isApplied && (
                                     <div className="mb-6 p-3 bg-amber-950/30 border border-amber-500/20 rounded-xl flex items-center justify-between">
                                         <div className="flex items-center gap-2 text-amber-500 text-xs font-bold">
                                             <AlertTriangle size={14} /> Gap: {course.title.split(' ').slice(0,2).join(' ')}...
@@ -308,14 +342,14 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                                     onClick={() => { setSelectedJob(job); setIntelMode(true); }}
                                     className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2"
                                 >
-                                    <Radar size={14} /> Reveal Intel
+                                    <Radar size={14} /> {isRecruiter ? 'Analyze Profile' : 'Reveal Intel'}
                                 </button>
                                 <button 
                                     onClick={() => handleApplyClick(job)}
                                     disabled={isApplied}
                                     className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${isApplied ? 'bg-emerald-900/20 text-emerald-600 border border-emerald-900' : 'bg-white text-black hover:bg-emerald-400 hover:scale-105'}`}
                                 >
-                                    {isApplied ? 'Target Acquired' : 'Initiate Strike'} {isApplied ? <CheckCircle size={14}/> : <ArrowRight size={14}/>}
+                                    {isApplied ? (isRecruiter ? 'Contacted' : 'Target Acquired') : (isRecruiter ? 'Contact Talent' : 'Initiate Strike')} {isApplied ? <CheckCircle size={14}/> : <ArrowRight size={14}/>}
                                 </button>
                             </div>
                         </div>
@@ -323,7 +357,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                 })}
             </div>
 
-            {/* --- Application Modal --- */}
+            {/* --- Application/Contact Modal --- */}
             {selectedJob && !intelMode && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setSelectedJob(null)}></div>
@@ -334,9 +368,9 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                             <div>
                                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                                     <Crosshair size={20} className="text-emerald-500"/>
-                                    {appStep === 'success' ? 'Mission Accomplished' : `Engaging Target: ${selectedJob.company}`}
+                                    {appStep === 'success' ? (isRecruiter ? 'Pipeline Updated' : 'Mission Accomplished') : (isRecruiter ? `Contacting: ${selectedJob.title}` : `Engaging Target: ${selectedJob.company}`)}
                                 </h2>
-                                <p className="text-xs text-slate-500 font-mono mt-1">REF: {selectedJob.id.toUpperCase()}</p>
+                                <p className="text-xs text-slate-500 font-mono mt-1">ID: {selectedJob.id.toUpperCase()}</p>
                             </div>
                             {appStep !== 'success' && <button onClick={() => setSelectedJob(null)} className="p-2 hover:bg-slate-800 rounded-full"><X size={20} className="text-slate-500"/></button>}
                         </div>
@@ -355,11 +389,13 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                                 <div className="flex flex-col md:flex-row h-full min-h-[500px]">
                                     <div className="w-full md:w-64 bg-[#020604] border-r border-slate-800 p-4 space-y-2">
                                         <button onClick={() => setActiveAssetTab('cover')} className={`w-full p-3 rounded-xl text-left text-sm font-bold flex items-center gap-2 ${activeAssetTab === 'cover' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'text-slate-500 hover:text-white'}`}>
-                                            <PenTool size={14}/> Cover Letter
+                                            <PenTool size={14}/> {isRecruiter ? 'Outreach Message' : 'Cover Letter'}
                                         </button>
-                                        <button onClick={() => setActiveAssetTab('resume')} className={`w-full p-3 rounded-xl text-left text-sm font-bold flex items-center gap-2 ${activeAssetTab === 'resume' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'text-slate-500 hover:text-white'}`}>
-                                            <FileText size={14}/> Tailored Resume
-                                        </button>
+                                        {!isRecruiter && (
+                                            <button onClick={() => setActiveAssetTab('resume')} className={`w-full p-3 rounded-xl text-left text-sm font-bold flex items-center gap-2 ${activeAssetTab === 'resume' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'text-slate-500 hover:text-white'}`}>
+                                                <FileText size={14}/> Tailored Resume
+                                            </button>
+                                        )}
                                     </div>
                                     <div className="flex-1 bg-[#0a1410] p-6">
                                         <textarea 
@@ -376,8 +412,13 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                                     <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mb-6 border border-emerald-500/50">
                                         <CheckCircle size={40} className="text-emerald-500" />
                                     </div>
-                                    <h3 className="text-2xl font-bold text-white mb-2">Application Deployed</h3>
+                                    <h3 className="text-2xl font-bold text-white mb-2">{isRecruiter ? 'Outreach Sent' : 'Application Deployed'}</h3>
                                     <p className="text-slate-400 text-sm">Target has been flagged in your dashboard.</p>
+                                    {!isRecruiter && (
+                                        <div className="mt-4 flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
+                                            <Save size={12}/> Tailored CV saved to Profile
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -386,7 +427,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                         {appStep === 'review' && (
                             <div className="p-6 border-t border-slate-800 bg-[#050b09] flex justify-end gap-4">
                                 <button onClick={() => setSelectedJob(null)} className="text-slate-500 hover:text-white text-sm font-bold px-4">Abort</button>
-                                {selectedJob.sourceUrl ? (
+                                {selectedJob.sourceUrl && !isRecruiter ? (
                                     <button 
                                         onClick={() => { window.open(selectedJob.sourceUrl, '_blank'); confirmApplication(); }}
                                         className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl flex items-center gap-2 shadow-lg"
@@ -398,7 +439,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ user, onChangeView, in
                                         onClick={confirmApplication}
                                         className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-900/50"
                                     >
-                                        <Send size={16}/> Launch Application
+                                        <Send size={16}/> {isRecruiter ? 'Send Message' : 'Launch Application'}
                                     </button>
                                 )}
                             </div>

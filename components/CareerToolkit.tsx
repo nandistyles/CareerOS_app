@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { UserProfile, ResumeAnalysis } from '../types';
-import { FileText, Mic, PenTool, Download, RefreshCw, Check, AlertCircle, Play, User, Briefcase, ChevronRight, Star, Sparkles, Printer, LayoutTemplate, Palette, Globe, Phone, MapPin, Mail, Zap, Edit3, Type, Layers } from 'lucide-react';
-import { analyzeResume, improveResumeText, generateInterviewQuestion, generateCoverLetter, tailorResumeToJob } from '../services/geminiService';
+import { UserProfile, ResumeAnalysis, RoleMatchAnalysis } from '../types';
+import { FileText, Mic, PenTool, Download, RefreshCw, Check, AlertCircle, Play, User, Briefcase, ChevronRight, Star, Sparkles, Printer, LayoutTemplate, Palette, Globe, Phone, MapPin, Mail, Zap, Edit3, Type, Layers, Compass, Target, BadgeCheck, Heart, Shield } from 'lucide-react';
+import { analyzeResume, improveResumeText, generateInterviewQuestion, generateCoverLetter, tailorResumeToJob, matchRolesToResume } from '../services/geminiService';
 
 declare global {
     interface Window {
@@ -20,30 +20,58 @@ const parseResume = (markdown: string) => {
     const lines = markdown.split('\n');
     const structure = {
         name: '',
+        role: '',
         contact: [] as string[],
         summary: '',
-        sections: [] as { title: string; content: string[] }[]
+        sections: [] as { title: string; content: { type: 'text' | 'bullet' | 'sub'; text: string }[] }[]
     };
 
-    let currentSection: { title: string; content: string[] } | null = null;
+    let currentSection: { title: string; content: any[] } | null = null;
+    let isHeader = true; // Flag to track if we are in the top header section
 
     lines.forEach(line => {
         const trimmed = line.trim();
         if (!trimmed) return;
 
         if (trimmed.startsWith('# ')) {
-            structure.name = trimmed.replace('# ', '');
+            structure.name = trimmed.replace(/^#\s+/, '');
         } else if (trimmed.startsWith('## ')) {
+            isHeader = false; // We hit the first section, header is done
             if (currentSection) structure.sections.push(currentSection);
-            currentSection = { title: trimmed.replace('## ', ''), content: [] };
-        } else if (trimmed.startsWith('- ') && currentSection) {
-            currentSection.content.push(trimmed.replace('- ', ''));
-        } else if (currentSection) {
-            currentSection.content.push(trimmed);
-        } else if (!currentSection && !structure.name) {
-             structure.contact.push(trimmed);
-        } else if (!currentSection && structure.name) {
-             structure.summary += trimmed + ' ';
+            currentSection = { title: trimmed.replace(/^##\s+/, ''), content: [] };
+        } else if (trimmed.startsWith('### ')) {
+             // Explicit Subheader
+             if(currentSection) {
+                 currentSection.content.push({ type: 'sub', text: trimmed.replace(/^###\s+/, '') });
+             }
+        } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            const text = trimmed.replace(/^[-*]\s+/, '');
+            if (currentSection) {
+                currentSection.content.push({ type: 'bullet', text });
+            }
+        } else {
+            // Regular text processing
+            if (isHeader) {
+                // Heuristic detection for header info
+                if (trimmed.includes('@') || trimmed.match(/(\+|00)[0-9]{1,3}[0-9 \-]{6,}/) || trimmed.toLowerCase().includes('.com')) {
+                    structure.contact.push(trimmed);
+                } else if (!structure.role && trimmed.length < 60 && !trimmed.includes('.')) {
+                    // Assume short line without period is a Role Title if not already set
+                    structure.role = trimmed;
+                } else {
+                    // Otherwise append to summary
+                    structure.summary += (structure.summary ? ' ' : '') + trimmed;
+                }
+            } else {
+                if (currentSection) {
+                    // Heuristic: If line contains pipe | or looks like "Title - Company", treat as subheader
+                    if (trimmed.includes('|') || (trimmed.includes(' - ') && trimmed.length < 80)) {
+                         currentSection.content.push({ type: 'sub', text: trimmed });
+                    } else {
+                         currentSection.content.push({ type: 'text', text: trimmed });
+                    }
+                }
+            }
         }
     });
     if (currentSection) structure.sections.push(currentSection);
@@ -51,7 +79,7 @@ const parseResume = (markdown: string) => {
 };
 
 export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser }) => {
-    const [activeTab, setActiveTab] = useState<'Resume' | 'Interview' | 'CoverLetter'>('Resume');
+    const [activeTab, setActiveTab] = useState<'Resume' | 'Interview' | 'CoverLetter' | 'Pathfinder'>('Resume');
     const isContractor = ['Contractor', 'AssetOwner', 'GrowthStartup'].includes(user.primaryFocus || '');
     
     // Resume State
@@ -61,6 +89,10 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
     const [isRewriting, setIsRewriting] = useState(false);
     const [previewMode, setPreviewMode] = useState(false);
     const [selectedTemplate, setSelectedTemplate] = useState<'modern' | 'minimal' | 'executive' | 'creative' | 'tech'>('modern');
+
+    // Pathfinder State
+    const [pathfinderResult, setPathfinderResult] = useState<RoleMatchAnalysis | null>(user.pathfinderAnalysis || null);
+    const [isMatchingRoles, setIsMatchingRoles] = useState(false);
 
     // Interview State
     const [interviewRole, setInterviewRole] = useState(user.industry ? `${user.industry} ${isContractor ? 'Client' : 'Specialist'}` : 'Project Manager');
@@ -75,7 +107,6 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
     const [isDrafting, setIsDrafting] = useState(false);
 
     const chatScrollRef = useRef<HTMLDivElement>(null);
-    const resumePreviewRef = useRef<HTMLDivElement>(null);
 
     // Sync resume content if user profile updates
     useEffect(() => {
@@ -85,11 +116,14 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
         if (user.resumeAnalysis && !analysis) {
             setAnalysis(user.resumeAnalysis);
         }
+        if (user.pathfinderAnalysis && !pathfinderResult) {
+            setPathfinderResult(user.pathfinderAnalysis);
+        }
         if (!user.resumeText && !resumeContent) {
             const template = '# ' + user.name + '\n' + (user.email || '') + ' | ' + (user.phoneNumber || '') + ' | ' + (user.location || '') + '\n\n## Professional Summary\nExperienced professional with a demonstrated history of working in the ' + (user.industry || 'industry') + '. Skilled in Strategic Planning, Management, and Leadership.\n\n## Experience\n### Role Title | Company Name | Date - Present\n- Achieved X resulting in Y improvement.\n- Led a team of Z people.\n\n## Education\n### Degree Name | University | Date';
             setResumeContent(template);
         }
-    }, [user.resumeText, user.resumeAnalysis, user.name]);
+    }, [user.resumeText, user.resumeAnalysis, user.pathfinderAnalysis, user.name]);
 
     useEffect(() => {
         if (chatScrollRef.current) {
@@ -108,6 +142,21 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
             onUpdateUser({ ...user, resumeText: resumeContent, resumeAnalysis: result });
         }
         setIsAnalyzing(false);
+    };
+
+    const handleRunPathfinder = async () => {
+        if (!resumeContent.trim()) {
+            alert("Please add content to your CV first in the Resume Architect tab.");
+            setActiveTab('Resume');
+            return;
+        }
+        setIsMatchingRoles(true);
+        const result = await matchRolesToResume(resumeContent);
+        if (result) {
+            setPathfinderResult(result);
+            onUpdateUser({ ...user, pathfinderAnalysis: result });
+        }
+        setIsMatchingRoles(false);
     };
 
     const handleAutoImprove = async () => {
@@ -185,47 +234,47 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
         // Template Classes
         const templates = {
             modern: {
-                container: "flex h-full font-sans bg-white text-slate-800",
-                sidebar: "w-1/3 bg-slate-900 text-white p-8 pt-12 flex flex-col gap-6",
-                main: "w-2/3 p-10 pt-12 bg-white",
-                name: "text-3xl font-bold uppercase tracking-tight mb-1 text-slate-900",
-                role: "text-slate-500 font-bold uppercase text-sm tracking-wider mb-6",
-                sectionTitle: "text-xs font-bold uppercase tracking-widest text-slate-400 mb-4 border-b border-slate-200 pb-2",
-                sidebarTitle: "text-xs font-bold uppercase tracking-widest text-slate-400 mb-3 border-b border-slate-700 pb-2",
+                container: "flex min-h-full font-sans bg-white text-slate-800",
+                sidebar: "w-[32%] bg-slate-900 text-white p-6 pt-10 flex flex-col gap-6 shrink-0",
+                main: "flex-1 p-8 pt-10 bg-white",
+                name: "text-3xl font-bold uppercase tracking-tight mb-1 text-slate-900 leading-none",
+                role: "text-slate-500 font-bold uppercase text-xs tracking-wider mb-6",
+                sectionTitle: "text-xs font-bold uppercase tracking-widest text-slate-400 mb-4 border-b border-slate-200 pb-1 mt-6",
+                sidebarTitle: "text-xs font-bold uppercase tracking-widest text-slate-400 mb-3 border-b border-slate-700 pb-1",
             },
             minimal: {
-                container: "h-full bg-white text-slate-900 p-12 font-serif",
+                container: "min-h-full bg-white text-slate-900 p-10 font-serif",
                 sidebar: "hidden",
-                main: "w-full mx-auto max-w-3xl",
-                name: "text-4xl font-normal text-center mb-2 font-serif",
-                role: "text-center text-xs uppercase tracking-[0.2em] text-slate-500 mb-8 font-sans",
-                sectionTitle: "text-sm font-bold uppercase text-center border-b border-black pb-2 mb-6 mt-8 font-sans",
+                main: "w-full mx-auto max-w-2xl",
+                name: "text-4xl font-normal text-center mb-1 font-serif text-slate-900",
+                role: "text-center text-xs uppercase tracking-[0.2em] text-slate-500 mb-6 font-sans",
+                sectionTitle: "text-sm font-bold uppercase text-center border-b border-black pb-1 mb-4 mt-8 font-sans",
                 sidebarTitle: "",
             },
             executive: {
-                container: "h-full bg-white text-slate-900 p-12 font-sans",
+                container: "min-h-full bg-white text-slate-900 p-10 font-sans",
                 sidebar: "hidden",
                 main: "w-full",
                 name: "text-3xl font-bold uppercase text-blue-900 mb-1 border-l-8 border-blue-900 pl-4",
-                role: "text-blue-700 font-medium pl-4 mb-8",
+                role: "text-blue-700 font-medium pl-4 mb-6",
                 sectionTitle: "bg-slate-100 text-blue-900 font-bold px-3 py-1 mb-4 mt-6 text-sm uppercase",
                 sidebarTitle: "",
             },
             creative: {
-                container: "h-full bg-white text-slate-800 font-sans",
+                container: "min-h-full bg-white text-slate-800 font-sans",
                 sidebar: "hidden",
                 main: "w-full",
-                name: "text-5xl font-extrabold text-white mb-2",
+                name: "text-5xl font-extrabold text-white mb-2 leading-none",
                 role: "text-white/80 font-medium text-lg",
                 sectionTitle: "text-rose-500 font-bold text-xl mb-4 mt-8 flex items-center gap-2",
                 sidebarTitle: "",
             },
             tech: {
-                container: "h-full bg-slate-50 text-slate-800 p-10 font-mono text-sm",
+                container: "min-h-full bg-slate-50 text-slate-800 p-8 font-mono text-xs",
                 sidebar: "hidden",
                 main: "w-full",
-                name: "text-2xl font-bold text-indigo-600 mb-2",
-                role: "text-slate-500 mb-8",
+                name: "text-2xl font-bold text-indigo-600 mb-1",
+                role: "text-slate-500 mb-6",
                 sectionTitle: "text-indigo-500 font-bold mb-4 mt-8 border-b-2 border-dashed border-indigo-200 pb-1",
                 sidebarTitle: "",
             }
@@ -235,11 +284,16 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
 
         // --- Render Helpers ---
         const RenderContact = () => (
-            <div className={`space-y-1 text-sm ${selectedTemplate === 'modern' ? 'text-slate-300' : 'text-slate-600 flex flex-wrap justify-center gap-4'}`}>
+            <div className={`space-y-1.5 text-xs ${selectedTemplate === 'modern' ? 'text-slate-300' : 'text-slate-600 flex flex-wrap justify-center gap-4'}`}>
                 {structure.contact.map((c, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                        {c.includes('@') && <Mail size={12}/>}
-                        {c.includes('+') && <Phone size={12}/>}
+                    <div key={i} className="flex items-center gap-2 break-all">
+                        {selectedTemplate === 'modern' ? (
+                            <>
+                                {c.includes('@') && <Mail size={10} className="shrink-0"/>}
+                                {c.match(/[0-9]{6,}/) && <Phone size={10} className="shrink-0"/>}
+                                {!c.includes('@') && !c.match(/[0-9]{6,}/) && <MapPin size={10} className="shrink-0"/>}
+                            </>
+                        ) : null}
                         <span>{c}</span>
                     </div>
                 ))}
@@ -254,8 +308,8 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
                     <div className="bg-slate-900 p-10 w-full mb-8 relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500 rounded-full blur-[80px] opacity-50 mix-blend-screen pointer-events-none"></div>
                         <h1 className={t.name}>{structure.name}</h1>
-                        <p className={t.role}>{user.currentRole || (isContractor ? 'Business Profile' : 'Creative Professional')}</p>
-                        <div className="flex gap-6 mt-6 text-white/70 text-sm font-medium">
+                        <p className={t.role}>{structure.role || user.currentRole || (isContractor ? 'Business Profile' : 'Creative Professional')}</p>
+                        <div className="flex flex-wrap gap-4 mt-6 text-white/70 text-sm font-medium">
                             {structure.contact.map((c, i) => <span key={i}>{c}</span>)}
                         </div>
                     </div>
@@ -264,21 +318,21 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
                 {/* --- SIDEBAR (Modern Only) --- */}
                 {selectedTemplate === 'modern' && (
                     <div className={t.sidebar}>
-                        <div className="w-20 h-20 bg-blue-500 rounded-full flex items-center justify-center text-2xl font-bold text-white mb-4">
+                        <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center text-xl font-bold text-white mb-2 shrink-0">
                             {structure.name.substring(0, 2).toUpperCase()}
                         </div>
                         
                         <div>
-                            <h3 className={t.sidebarTitle}>Contact</h3>
+                            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3 border-b border-slate-700 pb-1">Contact</h3>
                             <RenderContact />
                         </div>
 
                         <div>
-                            <h3 className={t.sidebarTitle}>{isContractor ? 'Services' : 'Skills'}</h3>
+                            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3 border-b border-slate-700 pb-1">{isContractor ? 'Services' : 'Skills'}</h3>
                             <div className="flex flex-wrap gap-2">
                                 {user.keywords?.map((k, i) => (
-                                    <span key={i} className="text-xs bg-slate-800 text-slate-300 px-2 py-1 rounded">{k}</span>
-                                )) || <span className="text-xs text-slate-500">Edit profile to add skills</span>}
+                                    <span key={i} className="text-[10px] bg-slate-800 text-slate-300 px-2 py-1 rounded">{k}</span>
+                                )) || <span className="text-[10px] text-slate-500">Edit profile to add skills</span>}
                             </div>
                         </div>
                     </div>
@@ -287,9 +341,9 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
                 {/* --- MAIN CONTENT --- */}
                 <div className={t.main}>
                     {selectedTemplate !== 'creative' && (
-                        <div className="mb-8">
+                        <div className="mb-6">
                             <h1 className={t.name}>{structure.name}</h1>
-                            <p className={t.role}>{user.currentRole || (isContractor ? 'Business Profile' : 'Professional')}</p>
+                            <p className={t.role}>{structure.role || user.currentRole || (isContractor ? 'Business Profile' : 'Professional')}</p>
                             {selectedTemplate !== 'modern' && <RenderContact />}
                         </div>
                     )}
@@ -300,7 +354,9 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
                             <h2 className={t.sectionTitle}>
                                 {selectedTemplate === 'tech' ? '> ' : ''}{isContractor ? 'Company Overview' : 'Professional Profile'}
                             </h2>
-                            <p className="text-sm leading-relaxed opacity-90">{structure.summary}</p>
+                            <p className={`leading-relaxed opacity-90 ${selectedTemplate === 'tech' ? 'text-xs' : 'text-sm'}`}>
+                                {structure.summary}
+                            </p>
                         </div>
                     )}
 
@@ -310,22 +366,30 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
                             <h2 className={t.sectionTitle}>
                                 {selectedTemplate === 'tech' ? '> ' : ''}{sec.title}
                             </h2>
-                            <div className="space-y-4">
-                                {sec.content.map((line, j) => {
-                                    if (line.startsWith('###')) {
-                                        // Job Title / School
+                            <div className="space-y-3">
+                                {sec.content.map((item, j) => {
+                                    if (item.type === 'sub') {
                                         return (
-                                            <div key={j} className="mt-4">
-                                                <h3 className="font-bold text-md">{line.replace('###', '').replace(/\|/g, ' • ')}</h3>
+                                            <div key={j} className="mt-3 first:mt-0">
+                                                <h3 className={`font-bold ${selectedTemplate === 'tech' ? 'text-xs text-indigo-700' : 'text-sm'}`}>
+                                                    {item.text.replace(/\|/g, ' • ')}
+                                                </h3>
+                                            </div>
+                                        );
+                                    } else if (item.type === 'bullet') {
+                                        return (
+                                            <div key={j} className={`flex items-start gap-2 ${selectedTemplate === 'tech' ? 'pl-0' : 'pl-2'}`}>
+                                                <span className={`mt-1.5 w-1 h-1 bg-current rounded-full shrink-0 opacity-50`}></span>
+                                                <span className={`opacity-90 leading-relaxed ${selectedTemplate === 'tech' ? 'text-xs' : 'text-sm'}`}>
+                                                    {item.text}
+                                                </span>
                                             </div>
                                         );
                                     } else {
-                                        // Bullet
                                         return (
-                                            <div key={j} className="flex items-start gap-2 text-sm pl-2">
-                                                <span className="opacity-50 mt-1.5 w-1 h-1 bg-current rounded-full shrink-0"></span>
-                                                <span className="opacity-90 leading-relaxed">{line.replace(/^-/, '')}</span>
-                                            </div>
+                                            <p key={j} className={`leading-relaxed opacity-90 ${selectedTemplate === 'tech' ? 'text-xs' : 'text-sm'}`}>
+                                                {item.text}
+                                            </p>
                                         );
                                     }
                                 })}
@@ -354,9 +418,12 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
                     </p>
                 </div>
                 
-                <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-xl">
+                <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-xl overflow-x-auto max-w-full">
                     <button onClick={() => setActiveTab('Resume')} className={`px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'Resume' ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}>
                         <FileText size={16} /> {isContractor ? 'Capability Statement' : 'Resume Architect'}
+                    </button>
+                    <button onClick={() => setActiveTab('Pathfinder')} className={`px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'Pathfinder' ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}>
+                        <Compass size={16} /> Pathfinder
                     </button>
                     <button onClick={() => setActiveTab('Interview')} className={`px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'Interview' ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}>
                         <Mic size={16} /> {isContractor ? 'Pitch Simulator' : 'Interview Sim'}
@@ -550,6 +617,88 @@ export const CareerToolkit: React.FC<CareerToolkitProps> = ({ user, onUpdateUser
                             </div>
                         )}
                     </div>
+                </div>
+            )}
+
+            {/* === CAREER PATHFINDER (Role Matcher) === */}
+            {activeTab === 'Pathfinder' && (
+                <div className="h-[calc(100vh-250px)] min-h-[600px] flex flex-col">
+                    {!pathfinderResult ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center max-w-2xl mx-auto p-8">
+                            <div className="w-24 h-24 bg-emerald-500/10 rounded-full flex items-center justify-center mb-8 border border-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.2)]">
+                                <Compass size={48} className="text-emerald-500" />
+                            </div>
+                            <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">Uncover Your True Value</h2>
+                            <p className="text-slate-500 dark:text-slate-400 text-lg mb-8 leading-relaxed">
+                                Not sure what jobs you can get? Feeling like an imposter? <br/>
+                                Our AI will deeply analyze your experience to find your <strong>Real Seniority Level</strong> and matching <strong>Job Titles</strong>.
+                            </p>
+                            <button 
+                                onClick={handleRunPathfinder}
+                                disabled={isMatchingRoles}
+                                className="px-10 py-4 bg-emerald-600 text-white font-bold rounded-full text-lg hover:bg-emerald-500 hover:scale-105 transition-all shadow-xl flex items-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed"
+                            >
+                                {isMatchingRoles ? <RefreshCw className="animate-spin" /> : <Target size={20} />}
+                                {isMatchingRoles ? 'Analyzing Career DNA...' : 'Reveal My Matches'}
+                            </button>
+                            <p className="text-xs text-slate-400 mt-6">Uses your current CV content from the "Resume Architect" tab.</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-full overflow-y-auto pb-10 animate-in fade-in slide-in-from-bottom-4">
+                            {/* Left: Validation & Confidence */}
+                            <div className="space-y-6">
+                                <div className="bg-slate-900 rounded-3xl p-8 border border-slate-800 shadow-xl relative overflow-hidden">
+                                    <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 blur-[80px] rounded-full pointer-events-none"></div>
+                                    <div className="relative z-10">
+                                        <div className="flex items-center gap-3 mb-4">
+                                            <BadgeCheck className="text-emerald-400" size={24} />
+                                            <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Market Verification</h3>
+                                        </div>
+                                        <h2 className="text-4xl font-bold text-white mb-2">{pathfinderResult.seniorityLevel}</h2>
+                                        <p className="text-slate-400 text-sm">Your experience qualifies you for this level.</p>
+                                        
+                                        <div className="mt-8 p-6 bg-emerald-900/20 border border-emerald-500/20 rounded-2xl">
+                                            <h4 className="font-bold text-white mb-2 flex items-center gap-2"><Zap size={16} className="text-yellow-400"/> Hidden Superpower</h4>
+                                            <p className="text-emerald-100 text-sm leading-relaxed">{pathfinderResult.hiddenSuperpower}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl">
+                                    <h3 className="font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2"><Heart size={18} className="text-rose-500"/> Confidence Boost</h3>
+                                    <p className="text-slate-600 dark:text-slate-300 leading-relaxed italic border-l-4 border-rose-500/50 pl-4">
+                                        "{pathfinderResult.confidenceBoost}"
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Right: Job Matches */}
+                            <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl overflow-y-auto">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="font-bold text-slate-900 dark:text-white text-lg">Your Best-Fit Roles</h3>
+                                    <button onClick={handleRunPathfinder} className="text-xs text-blue-500 font-bold hover:underline flex items-center gap-1"><RefreshCw size={12}/> Re-Analyze</button>
+                                </div>
+                                <div className="space-y-4">
+                                    {pathfinderResult.recommendedRoles.map((role, i) => (
+                                        <div key={i} className="p-5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 hover:border-blue-500 transition-colors group">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <h4 className="font-bold text-slate-900 dark:text-white text-lg">{role.title}</h4>
+                                                <span className={`px-3 py-1 rounded-full text-xs font-bold ${role.matchPercentage > 85 ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'}`}>
+                                                    {role.matchPercentage}% Match
+                                                </span>
+                                            </div>
+                                            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">{role.reason}</p>
+                                            <div className="flex gap-2">
+                                                {pathfinderResult.industryFit.slice(0,2).map((ind, idx) => (
+                                                    <span key={idx} className="text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-1 rounded">{ind}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
