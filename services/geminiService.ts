@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { Bid, StrategicPillar, JobOpportunity, ResumeAnalysis, QuizQuestion, StrategicGoal, Course, CourseModule, UserProfile } from '../types';
+import { Bid, StrategicPillar, JobOpportunity, ResumeAnalysis, QuizQuestion, StrategicGoal, Course, CourseModule, UserProfile, Mentor, NetworkEvent } from '../types';
 
 const getClient = () => {
     try {
@@ -18,6 +18,102 @@ const getClient = () => {
         return null;
     }
 }
+
+// --- NETWORK GENERATION ---
+
+export const generateMentors = async (industry: string, role: string): Promise<Mentor[]> => {
+    const ai = getClient();
+    if (!ai) return [];
+
+    const prompt = `
+    Generate 5 realistic professional mentor profiles for a user in:
+    Industry: ${industry}
+    Role: ${role}
+    
+    The mentors should be slightly more senior/experienced.
+    Return JSON array of Mentor objects.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            id: { type: Type.STRING },
+                            name: { type: Type.STRING },
+                            role: { type: Type.STRING },
+                            company: { type: Type.STRING },
+                            expertise: { type: Type.STRING },
+                            match: { type: Type.INTEGER },
+                            isConnected: { type: Type.BOOLEAN }
+                        },
+                        required: ["id", "name", "role", "company", "expertise", "match"]
+                    }
+                }
+            }
+        });
+        return JSON.parse(response.text || '[]') as Mentor[];
+    } catch (e) {
+        console.error("Mentor gen failed", e);
+        return [];
+    }
+};
+
+export const generateEvents = async (industry: string, location: string): Promise<NetworkEvent[]> => {
+    const ai = getClient();
+    if (!ai) return [];
+
+    const prompt = `
+    Generate 4 realistic professional networking events (Webinars, Meetups, Conferences) for:
+    Industry: ${industry}
+    Location: ${location} (If global, use 'Online' or major cities).
+    
+    Dates should be in the future relative to 2025/2026.
+    
+    Return JSON array of NetworkEvent objects.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            id: { type: Type.STRING },
+                            date: { type: Type.STRING },
+                            time: { type: Type.STRING },
+                            month: { type: Type.STRING },
+                            day: { type: Type.STRING },
+                            type: { type: Type.STRING },
+                            title: { type: Type.STRING },
+                            host: { type: Type.STRING },
+                            attendees: { type: Type.INTEGER },
+                            image: { type: Type.STRING },
+                            isAttending: { type: Type.BOOLEAN },
+                            desc: { type: Type.STRING }
+                        },
+                        required: ["id", "date", "time", "month", "day", "type", "title", "host", "desc"]
+                    }
+                }
+            }
+        });
+        return JSON.parse(response.text || '[]') as NetworkEvent[];
+    } catch (e) {
+        console.error("Event gen failed", e);
+        return [];
+    }
+};
 
 // --- BOARDROOM SIMULATION (NEW) ---
 

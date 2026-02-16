@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Check, Sparkles, X, CreditCard, Loader2, ShieldCheck, Zap, Lock, Smartphone, Banknote, ArrowRight, Target, FileText, BrainCircuit } from 'lucide-react';
+import { Check, Sparkles, X, CreditCard, Loader2, ShieldCheck, Zap, Lock, Smartphone, Banknote, ArrowRight, Target, FileText, BrainCircuit, Calendar, Download, AlertTriangle, Building2, UploadCloud, Globe } from 'lucide-react';
 import { UserProfile } from '../types';
 
 interface SubscriptionProps {
@@ -15,10 +15,21 @@ export const Subscription: React.FC<SubscriptionProps> = ({ user, onUpdateUser }
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   
-  // Payment Methods: 'card' | 'ecocash' | 'innbucks'
-  const [paymentMethod, setPaymentMethod] = useState('card');
+  // Payment Methods: 'paynow' | 'paypal' | 'bank'
+  const [paymentMethod, setPaymentMethod] = useState<'paynow' | 'paypal' | 'bank'>('paynow');
   const [mobileNumber, setMobileNumber] = useState('');
+  const [popFile, setPopFile] = useState<File | null>(null);
+
+  // Constants
+  const BANK_DETAILS = {
+      bank: "Stanbic Bank",
+      branch: "Samora Machel",
+      accName: "CareerOS Holdings",
+      accNumber: "9140001234567",
+      swift: "SBICZWHX"
+  };
 
   const getPrice = (monthlyPrice: number) => {
     if (billingCycle === 'monthly') return monthlyPrice;
@@ -29,23 +40,154 @@ export const Subscription: React.FC<SubscriptionProps> = ({ user, onUpdateUser }
       setSelectedPlan(planTitle);
       setShowPaymentModal(true);
       setPaymentSuccess(false);
+      setPaymentMethod('paynow');
   };
 
   const processPayment = () => {
-      if (paymentMethod !== 'card' && mobileNumber.length < 5) {
-          alert("Please enter a valid mobile number.");
-          return;
-      }
-
       setProcessing(true);
       
-      // Simulate API Latency & Verification
-      setTimeout(() => {
-          setProcessing(false);
-          setPaymentSuccess(true);
-          onUpdateUser({ ...user, isSubscribed: true });
-      }, 3000);
+      // LOGIC FOR DIFFERENT METHODS
+      if (paymentMethod === 'bank') {
+          if (!popFile) {
+              alert("Please upload a proof of payment.");
+              setProcessing(false);
+              return;
+          }
+          // In real app: Upload file to storage, create pending transaction
+          setTimeout(() => {
+              setProcessing(false);
+              setPaymentSuccess(true); 
+              // Note: Usually bank transfers require manual approval, but for demo we auto-approve
+              onUpdateUser({ ...user, isSubscribed: true });
+          }, 2000);
+      } 
+      else if (paymentMethod === 'paynow') {
+          // In real app: Redirect to Paynow Link
+          // window.location.href = "https://www.paynow.co.zw/Payment/Billpayment/..."
+          setTimeout(() => {
+              setProcessing(false);
+              setPaymentSuccess(true);
+              onUpdateUser({ ...user, isSubscribed: true });
+          }, 3000);
+      }
+      else {
+          // PayPal
+          setTimeout(() => {
+              setProcessing(false);
+              setPaymentSuccess(true);
+              onUpdateUser({ ...user, isSubscribed: true });
+          }, 3000);
+      }
   };
+
+  const cancelSubscription = () => {
+      if (confirm("Are you sure you want to cancel? You will lose access to the Strategy Engine and AI Tools.")) {
+          setIsCancelling(true);
+          setTimeout(() => {
+              onUpdateUser({ ...user, isSubscribed: false });
+              setIsCancelling(false);
+          }, 1500);
+      }
+  };
+
+  // --- SUB-COMPONENTS ---
+
+  const ManageSubscriptionView = () => (
+      <div className="max-w-4xl mx-auto p-6 animate-in fade-in slide-in-from-bottom-4">
+          <div className="mb-8 text-center md:text-left">
+              <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">Membership Management</h1>
+              <p className="text-slate-500">Manage your billing, invoices, and plan details.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              {/* Plan Card */}
+              <div className="md:col-span-2 bg-slate-900 text-white rounded-3xl p-8 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -mr-16 -mt-16"></div>
+                  <div className="relative z-10 flex justify-between items-start">
+                      <div>
+                          <div className="flex items-center gap-2 mb-2">
+                              <Sparkles className="text-amber-400" size={20} fill="currentColor" />
+                              <span className="text-sm font-bold uppercase tracking-wider text-emerald-400">Active Plan</span>
+                          </div>
+                          <h2 className="text-3xl font-bold mb-1">Executive Suite</h2>
+                          <p className="text-slate-400">$49.00 / month</p>
+                      </div>
+                      <div className="text-right hidden sm:block">
+                          <div className="text-xs text-slate-400 uppercase font-bold mb-1">Next Billing Date</div>
+                          <div className="font-mono text-lg">Oct 24, 2026</div>
+                      </div>
+                  </div>
+
+                  <div className="mt-8 flex flex-wrap gap-3">
+                      <div className="px-3 py-1 bg-white/10 rounded-lg text-xs font-bold flex items-center gap-2">
+                          <Check size={12} /> Strategy Engine
+                      </div>
+                      <div className="px-3 py-1 bg-white/10 rounded-lg text-xs font-bold flex items-center gap-2">
+                          <Check size={12} /> AI Toolkit
+                      </div>
+                      <div className="px-3 py-1 bg-white/10 rounded-lg text-xs font-bold flex items-center gap-2">
+                          <Check size={12} /> Priority Support
+                      </div>
+                  </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
+                  <div>
+                      <h3 className="font-bold text-slate-900 dark:text-white mb-4">Quick Actions</h3>
+                      <button className="w-full py-2 text-left text-sm text-slate-600 dark:text-slate-300 hover:text-indigo-500 font-medium flex items-center gap-2 mb-2">
+                          <CreditCard size={16} /> Update Payment Method
+                      </button>
+                      <button className="w-full py-2 text-left text-sm text-slate-600 dark:text-slate-300 hover:text-indigo-500 font-medium flex items-center gap-2">
+                          <FileText size={16} /> View Usage Report
+                      </button>
+                  </div>
+                  
+                  <button 
+                    onClick={cancelSubscription} 
+                    disabled={isCancelling}
+                    className="mt-6 w-full py-3 border border-red-200 dark:border-red-900/30 bg-red-50 dark:bg-red-900/10 text-red-600 dark:text-red-400 rounded-xl text-sm font-bold hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors flex items-center justify-center gap-2"
+                  >
+                      {isCancelling ? <Loader2 className="animate-spin" size={16} /> : <AlertTriangle size={16} />}
+                      {isCancelling ? 'Processing...' : 'Cancel Subscription'}
+                  </button>
+              </div>
+          </div>
+
+          {/* Invoice History */}
+          <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                  <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <FileText size={18} /> Invoice History
+                  </h3>
+                  <button className="text-xs font-bold text-indigo-500 hover:underline">Download All</button>
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                  {[
+                      { id: 'INV-001', date: 'Sep 24, 2026', amount: '$49.00', status: 'Paid' },
+                      { id: 'INV-000', date: 'Aug 24, 2026', amount: '$49.00', status: 'Paid' }
+                  ].map((inv) => (
+                      <div key={inv.id} className="p-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                          <div className="flex items-center gap-4">
+                              <div className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                                  <FileText size={20} className="text-slate-500 dark:text-slate-400" />
+                              </div>
+                              <div>
+                                  <div className="font-bold text-sm text-slate-900 dark:text-white">{inv.id}</div>
+                                  <div className="text-xs text-slate-500">{inv.date}</div>
+                              </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                              <span className="text-sm font-bold text-slate-900 dark:text-white">{inv.amount}</span>
+                              <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded text-xs font-bold">{inv.status}</span>
+                              <button className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white"><Download size={16} /></button>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      </div>
+  );
 
   const PlanCard = ({ title, price, features, description, popular = false, color = 'indigo' }: any) => {
     const colorStyles: any = {
@@ -127,6 +269,11 @@ export const Subscription: React.FC<SubscriptionProps> = ({ user, onUpdateUser }
         </div>
     );
   };
+
+  // --- RENDER CONDITION: ACTIVE MEMBER VS PROSPECT ---
+  if (user.isSubscribed) {
+      return <ManageSubscriptionView />;
+  }
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto pb-24 relative animate-in fade-in">
@@ -258,63 +405,97 @@ export const Subscription: React.FC<SubscriptionProps> = ({ user, onUpdateUser }
                                </div>
 
                                <div className="mb-6">
-                                   <div className="flex gap-3 mb-4">
+                                   <div className="flex gap-3 mb-4 overflow-x-auto pb-2">
                                        <button 
-                                            onClick={() => setPaymentMethod('card')}
-                                            className={`flex-1 py-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'card' ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500'}`}
+                                            onClick={() => setPaymentMethod('paynow')}
+                                            className={`flex-1 min-w-[100px] py-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'paynow' ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500'}`}
                                        >
                                            <CreditCard size={20} />
-                                           <span className="text-xs font-bold">Card</span>
+                                           <span className="text-xs font-bold text-center">Paynow / EcoCash</span>
                                        </button>
                                        <button 
-                                            onClick={() => setPaymentMethod('ecocash')}
-                                            className={`flex-1 py-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'ecocash' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 text-blue-600 dark:text-blue-400' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500'}`}
+                                            onClick={() => setPaymentMethod('paypal')}
+                                            className={`flex-1 min-w-[100px] py-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'paypal' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 text-blue-600 dark:text-blue-400' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500'}`}
                                        >
-                                           <Smartphone size={20} />
-                                           <span className="text-xs font-bold">Ecocash</span>
+                                           <Globe size={20} />
+                                           <span className="text-xs font-bold">PayPal</span>
                                        </button>
                                        <button 
-                                            onClick={() => setPaymentMethod('innbucks')}
-                                            className={`flex-1 py-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'innbucks' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-500 text-amber-600 dark:text-amber-400' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500'}`}
+                                            onClick={() => setPaymentMethod('bank')}
+                                            className={`flex-1 min-w-[100px] py-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${paymentMethod === 'bank' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-500 text-amber-600 dark:text-amber-400' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500'}`}
                                        >
-                                           <Banknote size={20} />
-                                           <span className="text-xs font-bold">Innbucks</span>
+                                           <Building2 size={20} />
+                                           <span className="text-xs font-bold">Wire Transfer</span>
                                        </button>
                                    </div>
 
-                                   {paymentMethod === 'card' ? (
-                                       <div className="space-y-4">
-                                           <div className="relative">
-                                               <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                                               <input className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/50 text-slate-900 dark:text-white font-mono" placeholder="Card Number" defaultValue="4242 4242 4242 4242" />
-                                           </div>
-                                           <div className="grid grid-cols-2 gap-4">
-                                               <input className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/50 text-slate-900 dark:text-white text-center font-mono" placeholder="MM/YY" defaultValue="12/28" />
-                                               <input className="w-full px-4 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/50 text-slate-900 dark:text-white text-center font-mono" placeholder="CVC" defaultValue="123" />
-                                           </div>
-                                       </div>
-                                   ) : (
+                                   {/* PAYNOW & ECOCASH */}
+                                   {paymentMethod === 'paynow' && (
                                        <div className="space-y-4 animate-in fade-in">
-                                           <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                                               <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                                                   {paymentMethod === 'ecocash' ? 'Ecocash Merchant Code' : 'Innbucks Account'}
-                                               </p>
-                                               <p className="text-lg font-mono font-bold text-slate-900 dark:text-white">
-                                                   {paymentMethod === 'ecocash' ? '*151*2*2*19283#' : '882736'}
-                                               </p>
-                                           </div>
-                                           <div className="relative">
-                                               <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                                               <input 
-                                                    className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/50 text-slate-900 dark:text-white font-mono" 
-                                                    placeholder="Enter your phone number" 
-                                                    value={mobileNumber}
-                                                    onChange={e => setMobileNumber(e.target.value)}
-                                                />
+                                           <div className="p-4 bg-indigo-50 dark:bg-indigo-900/10 rounded-xl border border-indigo-100 dark:border-indigo-800 flex items-center gap-3">
+                                               <div className="p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm">
+                                                   <Smartphone className="text-indigo-500" size={24} />
+                                               </div>
+                                               <div>
+                                                   <div className="font-bold text-sm text-slate-900 dark:text-white">Pay with EcoCash / OneMoney</div>
+                                                   <div className="text-xs text-slate-500">Secure redirect to Paynow gateway.</div>
+                                               </div>
                                            </div>
                                            <p className="text-xs text-slate-400 text-center">
-                                               A payment request will be sent to your phone.
+                                               Supports Visa, Mastercard, EcoCash, OneMoney, Telecash.
                                            </p>
+                                       </div>
+                                   )}
+
+                                   {/* PAYPAL */}
+                                   {paymentMethod === 'paypal' && (
+                                       <div className="space-y-4 animate-in fade-in">
+                                           <div className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-xl border border-blue-100 dark:border-blue-800 flex items-center gap-3">
+                                               <div className="p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm">
+                                                   <Globe className="text-blue-500" size={24} />
+                                               </div>
+                                               <div>
+                                                   <div className="font-bold text-sm text-slate-900 dark:text-white">International Payment</div>
+                                                   <div className="text-xs text-slate-500">Secure checkout via PayPal.</div>
+                                               </div>
+                                           </div>
+                                       </div>
+                                   )}
+
+                                   {/* BANK TRANSFER */}
+                                   {paymentMethod === 'bank' && (
+                                       <div className="space-y-4 animate-in fade-in text-left">
+                                           <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                                               <div className="flex justify-between mb-2">
+                                                   <span className="text-xs text-slate-500 font-bold uppercase">Bank</span>
+                                                   <span className="text-sm font-mono dark:text-white">{BANK_DETAILS.bank}</span>
+                                               </div>
+                                               <div className="flex justify-between mb-2">
+                                                   <span className="text-xs text-slate-500 font-bold uppercase">Account Name</span>
+                                                   <span className="text-sm font-mono dark:text-white">{BANK_DETAILS.accName}</span>
+                                               </div>
+                                               <div className="flex justify-between mb-2">
+                                                   <span className="text-xs text-slate-500 font-bold uppercase">Account No</span>
+                                                   <span className="text-sm font-mono dark:text-white">{BANK_DETAILS.accNumber}</span>
+                                               </div>
+                                               <div className="flex justify-between">
+                                                   <span className="text-xs text-slate-500 font-bold uppercase">Reference</span>
+                                                   <span className="text-sm font-mono text-indigo-500 font-bold">INV-{Math.floor(Math.random() * 9000) + 1000}</span>
+                                               </div>
+                                           </div>
+                                           
+                                           <div>
+                                               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Upload Proof of Payment</label>
+                                               <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-4 text-center cursor-pointer hover:border-indigo-500 transition-colors relative">
+                                                   <input 
+                                                        type="file" 
+                                                        className="absolute inset-0 opacity-0 cursor-pointer"
+                                                        onChange={(e) => setPopFile(e.target.files ? e.target.files[0] : null)}
+                                                   />
+                                                   <UploadCloud className="mx-auto text-slate-400 mb-2" size={20} />
+                                                   <p className="text-xs text-slate-500">{popFile ? popFile.name : "Click to upload PDF/Image"}</p>
+                                               </div>
+                                           </div>
                                        </div>
                                    )}
                                </div>
@@ -322,9 +503,17 @@ export const Subscription: React.FC<SubscriptionProps> = ({ user, onUpdateUser }
                                <button 
                                     onClick={processPayment} 
                                     disabled={processing} 
-                                    className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold flex justify-center items-center hover:bg-indigo-500 shadow-lg shadow-indigo-500/20 text-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className={`w-full py-4 text-white rounded-xl font-bold flex justify-center items-center shadow-lg text-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                                        paymentMethod === 'paypal' ? 'bg-[#0070BA] hover:bg-[#005ea6]' : 
+                                        paymentMethod === 'bank' ? 'bg-slate-900 dark:bg-slate-700 hover:bg-slate-800' :
+                                        'bg-indigo-600 hover:bg-indigo-500'
+                                    }`}
                                 >
-                                   {processing ? <Loader2 className="animate-spin" /> : `Pay $${getPrice(selectedPlan === 'Executive Suite' ? 49 : 0)} & Unlock`}
+                                   {processing ? <Loader2 className="animate-spin" /> : 
+                                        paymentMethod === 'bank' ? 'Submit Proof' : 
+                                        paymentMethod === 'paypal' ? 'Checkout with PayPal' :
+                                        `Pay $${getPrice(selectedPlan === 'Executive Suite' ? 49 : 0)} on Paynow`
+                                   }
                                </button>
                                <p className="text-center text-xs text-slate-400 mt-4 flex items-center justify-center gap-1">
                                    <Lock size={10} /> 256-bit SSL Encrypted. 

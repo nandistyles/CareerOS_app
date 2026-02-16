@@ -192,12 +192,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onChangeView }) => {
                       <Sparkles size={10} fill="currentColor"/> High Priority Intel
                   </div>
                   <h3 className="text-2xl md:text-3xl font-serif font-bold text-white mb-2 group-hover:text-emerald-400 transition-colors">
-                      {isContractor ? 'Ministry of Transport: Road Rehab' : 'Global Strategy Lead'}
+                      {/* Dynamic Placeholder based on user persona */}
+                      {user.savedJobIds && user.savedJobIds.length > 0 
+                        ? `Target: REF-${user.savedJobIds[0].substring(0,6).toUpperCase()}` 
+                        : isContractor ? 'Scan for High-Value Tenders' : 'Find Your Next Role'}
                   </h3>
                   <div className="flex items-center gap-4 text-sm text-slate-400 mb-8">
-                      <span className="flex items-center gap-1"><Building2 size={14} className="text-slate-500"/> {isContractor ? 'Govt of Zimbabwe' : 'TechCorp Inc.'}</span>
-                      <span className="flex items-center gap-1"><MapPin size={14} className="text-slate-500"/> {isContractor ? 'Harare' : 'Remote'}</span>
-                      <span className="font-bold text-emerald-100 bg-emerald-900/30 px-2 py-0.5 rounded">{isContractor ? '$500k Budget' : '$8k/mo'}</span>
+                      <span className="flex items-center gap-1"><Building2 size={14} className="text-slate-500"/> {isContractor ? 'Government / Private' : 'Top Companies'}</span>
+                      <span className="flex items-center gap-1"><MapPin size={14} className="text-slate-500"/> {user.location || 'Global'}</span>
+                      <span className="font-bold text-emerald-100 bg-emerald-900/30 px-2 py-0.5 rounded">{isContractor ? 'High Budget' : 'Competitive Pay'}</span>
                   </div>
                   <div className="flex gap-3">
                       <button className="px-6 py-3 bg-white text-black rounded-xl text-xs font-bold hover:bg-emerald-50 transition-colors uppercase tracking-wider">
@@ -248,20 +251,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onChangeView }) => {
                   <ArrowRight size={16} className="text-slate-500 group-hover:text-white group-hover:translate-x-1 transition-all"/>
               </div>
               <div className="space-y-3 relative z-10">
-                  <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/5">
-                      <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-white border border-slate-600">SN</div>
-                      <div className="flex-1">
-                          <div className="text-sm font-bold text-slate-200">Sarah Ndlovu</div>
-                          <div className="text-xs text-slate-500">Shared "Executive Leadership" protocol.</div>
+                  {user.network && user.network.length > 0 ? (
+                      user.network.slice(0, 2).map((mentor, i) => (
+                        <div key={i} className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/5">
+                            <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-white border border-slate-600">
+                                {mentor.name.charAt(0)}
+                            </div>
+                            <div className="flex-1">
+                                <div className="text-sm font-bold text-slate-200">{mentor.name}</div>
+                                <div className="text-xs text-slate-500">{mentor.role} at {mentor.company}</div>
+                            </div>
+                        </div>
+                      ))
+                  ) : (
+                      <div className="text-center py-4 text-slate-500 text-xs">
+                          No mentors connected. Go to Network Hub to find experts.
                       </div>
-                  </div>
-                  <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/5">
-                      <div className="w-8 h-8 rounded-full bg-indigo-900/50 text-indigo-400 border border-indigo-500/30 flex items-center justify-center text-xs font-bold">JM</div>
-                      <div className="flex-1">
-                          <div className="text-sm font-bold text-slate-200">John Moyo</div>
-                          <div className="text-xs text-slate-500">Connected with you via "Tech Titans".</div>
-                      </div>
-                  </div>
+                  )}
               </div>
           </div>
 

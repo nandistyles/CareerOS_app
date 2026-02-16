@@ -104,6 +104,33 @@ export interface ResumeAnalysis {
     roleFit: string;
 }
 
+// --- NETWORK ---
+
+export interface Mentor {
+    id: string;
+    name: string;
+    role: string;
+    company: string;
+    expertise: string;
+    match: number;
+    isConnected: boolean;
+}
+
+export interface NetworkEvent {
+    id: string;
+    date: string;
+    time: string;
+    month: string;
+    day: string;
+    type: string;
+    title: string;
+    host: string;
+    attendees: number;
+    image: string;
+    isAttending: boolean;
+    desc: string;
+}
+
 export interface UserProfile {
   name: string;
   headline?: string; 
@@ -144,6 +171,10 @@ export interface UserProfile {
   coachingSessions?: CoachingSession[];
   
   skillScore?: number; 
+
+  // Network
+  network?: Mentor[];
+  events?: NetworkEvent[];
 }
 
 export interface NotificationSettings {

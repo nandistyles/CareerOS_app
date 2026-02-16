@@ -1,36 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { UserProfile } from '../types';
-import { Users, Calendar, MessageSquare, MapPin, Search, X, Send, Filter, MoreHorizontal, Video, Globe, Briefcase, Award, TrendingUp, ChevronRight, Hash, Bell, Clock, Kanban, List, CheckCircle2, Mic2, Bot, BrainCircuit, Sparkles, User, Loader2 } from 'lucide-react';
-import { simulateBoardroom } from '../services/geminiService';
+import { UserProfile, Mentor, NetworkEvent } from '../types';
+import { Users, Calendar, MessageSquare, MapPin, Search, X, Send, Filter, MoreHorizontal, Video, Globe, Briefcase, Award, TrendingUp, ChevronRight, Hash, Bell, Clock, Kanban, List, CheckCircle2, Mic2, Bot, BrainCircuit, Sparkles, User, Loader2, RefreshCw } from 'lucide-react';
+import { simulateBoardroom, generateMentors, generateEvents } from '../services/geminiService';
+import { authService } from '../services/authService';
 
 interface NetworkProps {
     user: UserProfile;
 }
-
-const INITIAL_EVENTS = [
-    { id: 1, date: 'Feb 24', time: '14:00 GMT', month: 'FEB', day: '24', type: 'Webinar', title: 'Future of Work in Africa', host: 'TechZim', attendees: 420, image: 'bg-blue-900', isAttending: false, desc: 'Explore how AI and remote work are reshaping the African corporate landscape.' },
-    { id: 2, date: 'Feb 28', time: '18:00 Local', month: 'FEB', day: '28', type: 'Meetup', title: 'Procurement Professionals Mixer', host: 'CIPS Zimbabwe', attendees: 85, image: 'bg-purple-900', isAttending: false, desc: 'Networking drinks for supply chain experts at Meikles Hotel.' },
-    { id: 3, date: 'Mar 05', time: '09:00 GMT', month: 'MAR', day: '05', type: 'Workshop', title: 'Critical Grant Writing Workshop', host: 'CareerOS Academy', attendees: 1200, image: 'bg-emerald-900', isAttending: true, desc: 'A hands-on critical workshop for securing NGO funding.' },
-    { id: 4, date: 'Mar 12', time: '10:00 Local', month: 'MAR', day: '12', type: 'Conference', title: 'Women in Leadership Empowerment Summit', host: 'LeadAfrica', attendees: 300, image: 'bg-rose-900', isAttending: false, desc: 'Annual empowerment conference for female executives and founders.' },
-];
-
-const INITIAL_MENTORS = [
-    { id: 1, name: 'Sarah Johnson', role: 'Chief Marketing Officer', company: 'Econet', expertise: 'Brand Strategy', match: 95, isConnected: false },
-    { id: 2, name: 'David Moyo', role: 'Head of Logistics', company: 'Delta', expertise: 'Supply Chain', match: 88, isConnected: false },
-    { id: 3, name: 'Grace Chigumba', role: 'HR Director', company: 'Old Mutual', expertise: 'Talent Mgmt', match: 92, isConnected: true },
-    { id: 4, name: 'Tendai Gwatidzo', role: 'Tech Lead', company: 'Cassava', expertise: 'Software Arch', match: 75, isConnected: false },
-    { id: 5, name: 'Dr. K. Mutasa', role: 'Grant Director', company: 'USAID', expertise: 'Funding & Grants', match: 90, isConnected: false },
-];
-
-// RECRUITER CRM DATA
-const CANDIDATE_PIPELINE = [
-    { id: 101, name: "James Peterson", role: "Senior Architect", stage: "Interview", status: "Scheduled", date: "Tomorrow, 2pm" },
-    { id: 102, name: "Amanda Moyo", role: "Full Stack Dev", stage: "Offer", status: "Pending", date: "Sent 2 days ago" },
-    { id: 103, name: "Tariro S.", role: "Product Owner", stage: "Screening", status: "Reviewing", date: "Applied today" },
-    { id: 104, name: "Kevin Hart", role: "UX Designer", stage: "Sourced", status: "New", date: "Added from LinkedIn" },
-    { id: 105, name: "Lisa M.", role: "Data Scientist", stage: "Interview", status: "Feedback Needed", date: "Interviewed yesterday" },
-];
 
 export const NetworkHub: React.FC<NetworkProps> = ({ user }) => {
     const isRecruiter = user.primaryFocus === 'Recruiter';
@@ -39,8 +16,9 @@ export const NetworkHub: React.FC<NetworkProps> = ({ user }) => {
     const [activeTab, setActiveTab] = useState<'Boardroom' | 'Rolodex' | 'Events' | 'Pipeline'>('Boardroom');
     
     // Data State
-    const [events, setEvents] = useState(INITIAL_EVENTS);
-    const [mentors, setMentors] = useState(INITIAL_MENTORS);
+    const [mentors, setMentors] = useState<Mentor[]>(user.network || []);
+    const [events, setEvents] = useState<NetworkEvent[]>(user.events || []);
+    const [isGenerating, setIsGenerating] = useState(false);
     
     // Boardroom State
     const [boardTopic, setBoardTopic] = useState('');
@@ -86,12 +64,35 @@ export const NetworkHub: React.FC<NetworkProps> = ({ user }) => {
         }
     };
 
-    const handleRSVP = (id: number) => {
-        setEvents(prev => prev.map(e => e.id === id ? { ...e, isAttending: !e.isAttending } : e));
+    const handleRSVP = (id: string) => {
+        const updatedEvents = events.map(e => e.id === id ? { ...e, isAttending: !e.isAttending } : e);
+        setEvents(updatedEvents);
+        authService.updateUser({ ...user, events: updatedEvents });
     };
 
-    const handleConnect = (id: number) => {
-        setMentors(prev => prev.map(m => m.id === id ? { ...m, isConnected: !m.isConnected } : m));
+    const handleConnect = (id: string) => {
+        const updatedMentors = mentors.map(m => m.id === id ? { ...m, isConnected: !m.isConnected } : m);
+        setMentors(updatedMentors);
+        authService.updateUser({ ...user, network: updatedMentors });
+    };
+
+    const handleGenerateNetwork = async (type: 'mentors' | 'events') => {
+        setIsGenerating(true);
+        try {
+            if (type === 'mentors') {
+                const newMentors = await generateMentors(user.industry || 'General', user.currentRole || 'Professional');
+                setMentors(newMentors);
+                authService.updateUser({ ...user, network: newMentors });
+            } else {
+                const newEvents = await generateEvents(user.industry || 'General', user.location || 'Online');
+                setEvents(newEvents);
+                authService.updateUser({ ...user, events: newEvents });
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsGenerating(false);
+        }
     };
 
     // --- SUB-COMPONENTS ---
@@ -247,23 +248,11 @@ export const NetworkHub: React.FC<NetworkProps> = ({ user }) => {
                                 <div className="flex justify-between items-center mb-4">
                                     <h3 className="font-bold text-slate-300 uppercase text-xs tracking-wider">{stage}</h3>
                                     <span className="bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full text-xs font-bold">
-                                        {CANDIDATE_PIPELINE.filter(c => c.stage === stage).length}
+                                        0
                                     </span>
                                 </div>
                                 <div className="space-y-3">
-                                    {CANDIDATE_PIPELINE.filter(c => c.stage === stage).map(candidate => (
-                                        <div key={candidate.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-indigo-500 cursor-move transition-colors group relative">
-                                            <div className="flex justify-between items-start mb-2">
-                                                <div className="font-bold text-white text-sm">{candidate.name}</div>
-                                                <MoreHorizontal size={14} className="text-slate-500 hover:text-white cursor-pointer" />
-                                            </div>
-                                            <div className="text-xs text-slate-400 mb-3">{candidate.role}</div>
-                                            <div className="flex items-center justify-between border-t border-slate-700 pt-3 mt-3">
-                                                <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${candidate.status.includes('Scheduled') ? 'bg-emerald-500/20 text-emerald-400' : candidate.status.includes('Pending') ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-400'}`}>{candidate.status}</span>
-                                                <button className="text-slate-500 hover:text-white transition-colors"><ChevronRight size={16} /></button>
-                                            </div>
-                                        </div>
-                                    ))}
+                                    <div className="text-center py-8 text-slate-500 text-xs">No active candidates.</div>
                                     <button className="w-full py-3 border border-dashed border-slate-700 rounded-xl text-slate-500 text-xs font-bold hover:bg-slate-800 hover:text-white transition-colors">+ Add Candidate</button>
                                 </div>
                             </div>
@@ -293,51 +282,90 @@ export const NetworkHub: React.FC<NetworkProps> = ({ user }) => {
                                 </div>
                                 <button className="px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-400 hover:text-white"><Filter size={20} /></button>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {mentors.filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase()) || m.role.toLowerCase().includes(searchQuery.toLowerCase())).map(m => (
-                                    <div key={m.id} className="bg-slate-900 p-6 rounded-2xl border border-slate-800 hover:border-indigo-500 transition-colors group relative overflow-hidden">
-                                        <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity"><Sparkles size={16} className="text-amber-400" /></div>
-                                        <div className="flex items-center gap-4 mb-4">
-                                            <div className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg ${m.isConnected ? 'bg-emerald-900 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>{m.name.charAt(0)}</div>
-                                            <div>
-                                                <h3 className="font-bold text-white text-lg">{m.name}</h3>
-                                                <p className="text-sm text-slate-400">{m.role}</p>
-                                                <p className="text-xs text-slate-500">{m.company}</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-wrap gap-2 mb-6">
-                                            <span className="px-2 py-1 bg-slate-800 rounded text-xs text-slate-400 border border-slate-700">{m.expertise}</span>
-                                            {m.match > 85 && <span className="px-2 py-1 bg-indigo-900/30 rounded text-xs text-indigo-400 border border-indigo-500/30">High Match</span>}
-                                        </div>
-                                        <button onClick={() => handleConnect(m.id)} className={`w-full py-3 rounded-xl font-bold transition-colors ${m.isConnected ? 'bg-slate-800 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}>{m.isConnected ? 'Message' : 'Smart Connect (AI Intro)'}</button>
+                            
+                            {mentors.length === 0 ? (
+                                <div className="text-center py-20 bg-slate-900/50 rounded-3xl border border-slate-800 border-dashed">
+                                    <div className="w-20 h-20 bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+                                        <Users size={40} className="text-indigo-400" />
                                     </div>
-                                ))}
-                            </div>
+                                    <h3 className="text-xl font-bold text-white mb-2">No Mentors Connected</h3>
+                                    <p className="text-slate-400 mb-8 max-w-sm mx-auto">Build your inner circle. AI will find professionals in <strong>{user.industry}</strong> that match your career stage.</p>
+                                    <button 
+                                        onClick={() => handleGenerateNetwork('mentors')}
+                                        disabled={isGenerating}
+                                        className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-500 transition-colors shadow-lg flex items-center gap-2 mx-auto"
+                                    >
+                                        {isGenerating ? <Loader2 className="animate-spin"/> : <RefreshCw size={18}/>}
+                                        {isGenerating ? 'Scouting Talent...' : 'Find Strategic Mentors'}
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {mentors.filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase()) || m.role.toLowerCase().includes(searchQuery.toLowerCase())).map(m => (
+                                        <div key={m.id} className="bg-slate-900 p-6 rounded-2xl border border-slate-800 hover:border-indigo-500 transition-colors group relative overflow-hidden">
+                                            <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity"><Sparkles size={16} className="text-amber-400" /></div>
+                                            <div className="flex items-center gap-4 mb-4">
+                                                <div className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg ${m.isConnected ? 'bg-emerald-900 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>{m.name.charAt(0)}</div>
+                                                <div>
+                                                    <h3 className="font-bold text-white text-lg">{m.name}</h3>
+                                                    <p className="text-sm text-slate-400">{m.role}</p>
+                                                    <p className="text-xs text-slate-500">{m.company}</p>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 mb-6">
+                                                <span className="px-2 py-1 bg-slate-800 rounded text-xs text-slate-400 border border-slate-700">{m.expertise}</span>
+                                                {m.match > 85 && <span className="px-2 py-1 bg-indigo-900/30 rounded text-xs text-indigo-400 border border-indigo-500/30">High Match</span>}
+                                            </div>
+                                            <button onClick={() => handleConnect(m.id)} className={`w-full py-3 rounded-xl font-bold transition-colors ${m.isConnected ? 'bg-slate-800 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}>{m.isConnected ? 'Message' : 'Smart Connect (AI Intro)'}</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
 
                     {/* EVENTS TAB */}
                     {activeTab === 'Events' && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 h-full overflow-y-auto custom-scrollbar pb-20">
-                            {events.map(e => (
-                                <div key={e.id} className="group bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 hover:border-slate-600 transition-all cursor-pointer">
-                                    <div className={`h-40 ${e.image} relative p-6 flex flex-col justify-end`}>
-                                        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors"></div>
-                                        <div className="relative z-10">
-                                            <span className="bg-black/40 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded border border-white/10 uppercase mb-2 inline-block">{e.type}</span>
-                                            <h3 className="text-xl font-bold text-white leading-tight">{e.title}</h3>
-                                        </div>
+                        <div className="h-full overflow-y-auto custom-scrollbar pb-20">
+                            {events.length === 0 ? (
+                                <div className="text-center py-20 bg-slate-900/50 rounded-3xl border border-slate-800 border-dashed">
+                                    <div className="w-20 h-20 bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+                                        <Calendar size={40} className="text-emerald-400" />
                                     </div>
-                                    <div className="p-6">
-                                        <div className="flex items-center gap-4 text-sm text-slate-400 mb-4">
-                                            <span className="flex items-center gap-1"><Calendar size={14}/> {e.date}</span>
-                                            <span className="flex items-center gap-1"><Clock size={14}/> {e.time}</span>
-                                        </div>
-                                        <p className="text-sm text-slate-500 mb-6">{e.desc}</p>
-                                        <button onClick={() => handleRSVP(e.id)} className={`w-full py-3 rounded-xl font-bold transition-all ${e.isAttending ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white text-slate-900 hover:bg-slate-200'}`}>{e.isAttending ? 'Registered' : 'Generate Prep Brief & RSVP'}</button>
-                                    </div>
+                                    <h3 className="text-xl font-bold text-white mb-2">No Upcoming Events</h3>
+                                    <p className="text-slate-400 mb-8 max-w-sm mx-auto">Find relevant conferences, webinars, and meetups for <strong>{user.industry}</strong>.</p>
+                                    <button 
+                                        onClick={() => handleGenerateNetwork('events')}
+                                        disabled={isGenerating}
+                                        className="px-8 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-500 transition-colors shadow-lg flex items-center gap-2 mx-auto"
+                                    >
+                                        {isGenerating ? <Loader2 className="animate-spin"/> : <RefreshCw size={18}/>}
+                                        {isGenerating ? 'Scanning Calendar...' : 'Discover Events'}
+                                    </button>
                                 </div>
-                            ))}
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                    {events.map(e => (
+                                        <div key={e.id} className="group bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 hover:border-slate-600 transition-all cursor-pointer">
+                                            <div className={`h-40 ${e.image || 'bg-slate-800'} relative p-6 flex flex-col justify-end`}>
+                                                <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors"></div>
+                                                <div className="relative z-10">
+                                                    <span className="bg-black/40 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded border border-white/10 uppercase mb-2 inline-block">{e.type}</span>
+                                                    <h3 className="text-xl font-bold text-white leading-tight">{e.title}</h3>
+                                                </div>
+                                            </div>
+                                            <div className="p-6">
+                                                <div className="flex items-center gap-4 text-sm text-slate-400 mb-4">
+                                                    <span className="flex items-center gap-1"><Calendar size={14}/> {e.date}</span>
+                                                    <span className="flex items-center gap-1"><Clock size={14}/> {e.time}</span>
+                                                </div>
+                                                <p className="text-sm text-slate-500 mb-6">{e.desc}</p>
+                                                <button onClick={() => handleRSVP(e.id)} className={`w-full py-3 rounded-xl font-bold transition-all ${e.isAttending ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white text-slate-900 hover:bg-slate-200'}`}>{e.isAttending ? 'Registered' : 'Generate Prep Brief & RSVP'}</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
